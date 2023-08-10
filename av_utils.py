@@ -63,8 +63,16 @@ def tmy_download(latitude, longitude, tz):
         if offset_hours < 0:
             offset_hours = -offset_hours
             offset_hours = int(offset_hours)
-            tmy_pvg = tmy_pvg_r.iloc[offset_hours:].append(tmy_pvg_r.iloc[:offset_hours])
-            tmy_pvg["time"] = pd.date_range(start = "2022-01-01 00:00", end="2022-12-31 23:00", freq="h", tz=tz)
+            # Extract the first three rows
+            first_rows = tmy_pvg_r.head(offset_hours)
+
+            # Remove the first three rows from the original DataFrame
+            tmy_pvg_r  = tmy_pvg_r.drop(tmy_pvg_r.index[:offset_hours])
+
+            # Concatenate the modified DataFrame and the first three rows
+            tmy = pd.concat([tmy_pvg_r, first_rows])
+
+            tmy["time"] = pd.date_range(start = "2022-01-01 00:00", end="2022-12-31 23:00", freq="h", tz=tz)
             
         
         else:
@@ -74,7 +82,7 @@ def tmy_download(latitude, longitude, tz):
         # process tmy data: Rename for pvlib
         cols_to_use = [ "time", "T2m", "G(h)", "Gb(n)", "Gd(h)", "IR(h)", "WS10m", "RH", "SP"] 
         pvlib_column_names = ["time", "temp_air", "ghi", "dni", "dhi", "lwr_u", "wind_speed", "rh", "sp" ] #"info", "info_values",
-        tmy = tmy_pvg[cols_to_use]
+        tmy = tmy[cols_to_use]
         tmy.columns = pvlib_column_names
 
         location = Location(latitude, longitude, tz, altitude)
