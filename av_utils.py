@@ -100,11 +100,11 @@ def tmy_download(latitude, longitude, tz):
     return tmy, altitude
 
 
-def pv_yield(tmy_data, albedo, track, pvrow_azimuth, pvrow_tilt, n_pvrows, pvrow_width, pvrow_pitch, pvrow_height, bifaciality): # pvrow_tilt with tracking == True is equal to max tilt
+def pv_yield(tmy_data, albedo, track, pvrow_azimuth, pvrow_tilt, n_pvrows, pvrow_width, pvrow_pitch, pvrow_height, bifaciality, observed_row): # pvrow_tilt with tracking == True is equal to max tilt
     
     #Definition of PV array
     gcr = pvrow_width / pvrow_pitch
-    axis_azimuth = pvrow_azimuth + 90
+    axis_azimuth = pvrow_azimuth - 90
     
     pvarray_parameters = {
         'n_pvrows': n_pvrows,
@@ -146,7 +146,7 @@ def pv_yield(tmy_data, albedo, track, pvrow_azimuth, pvrow_tilt, n_pvrows, pvrow
                              pvrow_width,
                              albedo,
                              n_pvrows=n_pvrows,
-                             index_observed_pvrow=2
+                             index_observed_pvrow=observed_row
                              )
 
     # turn into pandas DataFrame
@@ -194,5 +194,79 @@ def pv_yield(tmy_data, albedo, track, pvrow_azimuth, pvrow_tilt, n_pvrows, pvrow
     return results_ac_real
 
 
+def shadow_ratio(tmy_data, albedo, track, pvrow_azimuth, pvrow_tilt, n_pvrows, pvrow_width, pvrow_pitch, pvrow_height): # pvrow_tilt with tracking == True is equal to max tilt
+    
+    #Definition of PV array
+    gcr = pvrow_width / pvrow_pitch
+    axis_azimuth = pvrow_azimuth + 90
+    
+    pvarray_parameters = {
+        'n_pvrows': n_pvrows,
+        'axis_azimuth': axis_azimuth,
+        'pvrow_height': pvrow_height,
+        'pvrow_width': pvrow_width,
+        'gcr': gcr
+    }
 
+    # Create an ordered PV array
+    pvarray = OrderedPVArray.init_from_dict(pvarray_parameters) # ground is not initalized: https://github.com/SunPower/pvfactors/blob/master/pvfactors/geometry/pvarray.py#L12
+
+    if track == True:
+        # pv-tracking algorithm to get pv-tilt
+        orientation = tracking.singleaxis(tmy_data['apparent_zenith'],
+                                        tmy_data['azimuth'],
+                                        max_angle=pvrow_tilt,
+                                        backtrack=True,
+                                        gcr=gcr
+                                        )
+        tmy_data['surface_azimuth'] = orientation['surface_azimuth']
+        tmy_data['surface_tilt'] = orientation['surface_tilt'] 
+    else:
+        tmy_data['surface_azimuth'] = np.where((tmy_data["apparent_zenith"] > 0 ) & (tmy_data["apparent_zenith"] < 90), pvrow_azimuth,np.nan)
+        tmy_data['surface_tilt'] = np.where((tmy_data["apparent_zenith"] > 0 ) & (tmy_data["apparent_zenith"] < 90), pvrow_tilt,np.nan)
+    
+    # Create engine using the PV array
+    engine = PVEngine(pvarray) 
+
+    # Fit engine to data: which will update the pvarray object as well
+    engine.fit(tmy_data.index, tmy_data.dni, tmy_data.dhi,
+            tmy_data.zenith, tmy_data.azimuth,
+            tmy_data.surface_tilt, tmy_data.surface_azimuth,
+            albedo= albedo)
+
+    """"
+    a = pd.DataFrame()
+    for i in range(0,len(pvarray.ts_ground.all_ts_surfaces)):
+        a[str(i)+"_0,0"] = pvarray.ts_ground.all_ts_surfaces[i].coords.as_array[0][0]
+        a[str(i)+"_1,0"] = pvarray.ts_ground.all_ts_surfaces[i].coords.as_array[1][0]
+
+    # set x_min and x_max so that only area under PV array is considered (between second and second to last row)
+    a[a < pvrow_pitch] = pvrow_pitch
+    a[a > pvrow_pitch * (n_pvrows -2)] = pvrow_pitch * (n_pvrows -2)
+
+    # sum up the shadow and ilum lenghts
+    for i in range(0,len(pvarray.ts_ground.all_ts_surfaces)):
+        a[str(i)] = a[str(i)+"_1,0"] - a[str(i)+"_0,0"]
+
+    print("shadow ratio is calculated between x = "+str(pvrow_pitch)+" m and "+str(pvrow_pitch * (n_pvrows -2))+" m")
+
+    shadow = 0
+    for i in range(0,pvarray.ts_ground.n_ts_shaded_surfaces):
+        shadow += a[str(i)]
+
+    light = 0
+    for i in range(pvarray.ts_ground.n_ts_shaded_surfaces,len(pvarray.ts_ground.all_ts_surfaces)):
+        light += a[str(i)]
+
+
+    sl = pd.DataFrame()
+    sl["lenght_shadow"] = shadow
+    sl["lenght_ilum"] = light
+    sl["sum"] = sl["lenght_ilum"]+sl["lenght_shadow"]
+    sl["shadow_ratio"] = 1 / sl["sum"] * sl["lenght_shadow"]
+
+    sl, 
+    """
+
+    return pvarray
 
